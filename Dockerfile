@@ -9,8 +9,8 @@ RUN corepack enable
 
 # Copy workspace configuration
 COPY pnpm-workspace.yaml ./
+COPY pnpm-lock.yaml ./
 COPY apps/api/package.json ./apps/api/
-COPY apps/api/pnpm-lock.yaml ./
 
 # Install dependencies from workspace root
 RUN pnpm install --frozen-lockfile
