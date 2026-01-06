@@ -7,14 +7,12 @@ WORKDIR /app
 RUN npm install -g pnpm corepack@latest
 RUN corepack enable
 
-# Copy workspace files
+# Copy workspace configuration
 COPY pnpm-workspace.yaml ./
+COPY apps/api/package.json ./apps/api/
+COPY apps/api/pnpm-lock.yaml ./
 
-# Copy package files for workspace
-COPY apps/api/package.json apps/api/pnpm-lock.yaml ./apps/api/
-
-# Install dependencies
-WORKDIR /app/apps/api
+# Install dependencies from workspace root
 RUN pnpm install --frozen-lockfile
 
 # Install necessary build dependencies
@@ -26,9 +24,10 @@ RUN apt-get update -qq && \
     && update-ca-certificates
 
 # Copy the application code
-COPY apps/api/ ./
+COPY apps/api/ ./apps/api/
 
 # Build Go module
+WORKDIR /app/apps/api
 RUN cd src/lib/go-html-to-md && \
     go mod tidy && \
     go build -o html-to-markdown.so -buildmode=c-shared html-to-markdown.go && \
