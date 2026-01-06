@@ -9,7 +9,6 @@ RUN corepack enable
 
 # Copy workspace files
 COPY pnpm-workspace.yaml ./
-COPY .npmrc ./npmrc 2>/dev/null || :
 
 # Copy package files for workspace
 COPY apps/api/package.json apps/api/pnpm-lock.yaml ./apps/api/
