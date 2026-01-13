@@ -27,9 +27,11 @@ export async function scrapeWithPlaywright(
     startTime: Date.now(),
   };
 
+  let waitParam = waitFor;
+
   try {
     const reqParams = await generateRequestParams(url);
-    const waitParam = reqParams["params"]?.wait ?? waitFor;
+    waitParam = reqParams["params"]?.wait ?? waitFor;
 
     Logger.info(`🔗 Attempting to connect to Playwright service at: ${process.env.PLAYWRIGHT_MICROSERVICE_URL}`);
     Logger.info(`📄 Scraping URL: ${url} with waitParam: ${waitParam}`);
