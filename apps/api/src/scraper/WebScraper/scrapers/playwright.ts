@@ -31,6 +31,9 @@ export async function scrapeWithPlaywright(
     const reqParams = await generateRequestParams(url);
     const waitParam = reqParams["params"]?.wait ?? waitFor;
 
+    Logger.info(`🔗 Attempting to connect to Playwright service at: ${process.env.PLAYWRIGHT_MICROSERVICE_URL}`);
+    Logger.info(`📄 Scraping URL: ${url} with waitParam: ${waitParam}`);
+
     const response = await axios.post(
       process.env.PLAYWRIGHT_MICROSERVICE_URL,
       {
@@ -46,6 +49,8 @@ export async function scrapeWithPlaywright(
         transformResponse: [(data) => data],
       }
     );
+
+    Logger.info(`✅ Playwright service responded with status: ${response.status}`);
 
     if (response.status !== 200) {
       Logger.debug(
@@ -87,12 +92,26 @@ export async function scrapeWithPlaywright(
   } catch (error) {
     if (error.code === "ECONNABORTED") {
       logParams.error_message = "Request timed out";
-      Logger.debug(`⛏️ Playwright: Request timed out for ${url}`);
+      Logger.error(`❌ Playwright: Request timed out for ${url}`);
+      Logger.error(`⏱️ Timeout was set to: ${universalTimeout + waitParam}ms`);
+    } else if (error.response) {
+      // Server responded with error status
+      logParams.error_message = error.message || error;
+      Logger.error(`❌ Playwright service error for ${url}:`);
+      Logger.error(`   Status: ${error.response.status}`);
+      Logger.error(`   Status Text: ${error.response.statusText}`);
+      Logger.error(`   Response data: ${JSON.stringify(error.response.data)}`);
+    } else if (error.request) {
+      // Request made but no response received
+      logParams.error_message = "No response from Playwright service";
+      Logger.error(`❌ Playwright: No response received for ${url}`);
+      Logger.error(`   Error code: ${error.code}`);
+      Logger.error(`   Error message: ${error.message}`);
+      Logger.error(`   Playwright URL: ${process.env.PLAYWRIGHT_MICROSERVICE_URL}`);
     } else {
       logParams.error_message = error.message || error;
-      Logger.debug(
-        `⛏️ Playwright: Failed to fetch url: ${url} | Error: ${error}`
-      );
+      Logger.error(`❌ Playwright: Failed to fetch url: ${url}`);
+      Logger.error(`   Error: ${error.message || error}`);
     }
     return {
       content: "",
