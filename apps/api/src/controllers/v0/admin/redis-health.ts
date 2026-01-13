@@ -17,7 +17,25 @@ export async function redisHealthController(req: Request, res: Response) {
   };
 
   try {
-    const queueRedis = new Redis(process.env.REDIS_URL);
+    const queueRedis = new Redis(process.env.REDIS_URL, {
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+      enableOfflineQueue: true,
+      retryStrategy(times) {
+        const delay = Math.min(times * 50, 2000);
+        return delay;
+      },
+      reconnectOnError(err) {
+        const targetError = "READONLY";
+        if (err.message.includes(targetError)) {
+          return true;
+        }
+        return false;
+      },
+      keepAlive: 30000,
+      connectTimeout: 10000,
+      lazyConnect: false,
+    });
 
     const testKey = "test";
     const testValue = "test";
