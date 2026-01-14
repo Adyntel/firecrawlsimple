@@ -125,81 +125,81 @@ function removeSkipToContentLinks(markdownContent: string): string {
 }
 
 function cleanMarkdownContent(markdownContent: string): string {
-  // 1. Initial cleanup: literal newlines and carriage returns
-  let rawLines = markdownContent
-    .replace(/\\n/g, '\n') // Fix literal "\n" strings
-    .split(/\r?\n/);
+  // ---------------------------------------------------------
+  // 1. THE NUCLEAR FIX FOR \n
+  // ---------------------------------------------------------
+  // This aggressively replaces literal "\\n" (two chars) with actual newline
+  // We do this BEFORE splitting so the structure is correct.
+  let cleanInput = markdownContent
+    .replace(/\\n/g, '\n')   // Convert literal \n to real newline
+    .replace(/\\r/g, '')     // Remove literal \r
+    .replace(/\r\n/g, '\n')  // Normalize Windows line endings
+    .replace(/\r/g, '\n');   // Normalize old Mac line endings
 
+  // Split into lines based on REAL newlines now
+  let rawLines = cleanInput.split('\n');
   let processedLines: string[] = [];
-  
-  // 2. Normalize Headers (Fixing the "----" and "====" issue)
-  // We look for lines that are purely separators and convert the PREVIOUS line to a header
+
+  // ---------------------------------------------------------
+  // 2. Structure Normalization (Headers)
+  // ---------------------------------------------------------
   for (let i = 0; i < rawLines.length; i++) {
     const line = rawLines[i].trim();
     const nextLine = rawLines[i + 1] ? rawLines[i + 1].trim() : '';
 
-    // Convert "Title \n ====" to "# Title"
+    // Convert Setext headers (====, ----) to ATX headers (#, ##)
     if (/^={3,}$/.test(nextLine) && line.length > 0) {
       processedLines.push(`# ${line}`);
-      i++; // Skip the separator line
-    }
-    // Convert "Subtitle \n ----" to "## Subtitle"
-    else if (/^-{3,}$/.test(nextLine) && line.length > 0) {
+      i++; 
+    } else if (/^-{3,}$/.test(nextLine) && line.length > 0) {
       processedLines.push(`## ${line}`);
-      i++; // Skip the separator line
-    }
-    else {
-      processedLines.push(rawLines[i]);
+      i++; 
+    } else {
+      processedLines.push(rawLines[i]); // Keep indentation
     }
   }
 
-  // 3. Identify the "Real" Start of Content
-  // We look for the first H1 (#) or H2 (##) that isn't a link
+  // ---------------------------------------------------------
+  // 3. Find Main Content (Skip Nav)
+  // ---------------------------------------------------------
   let contentStartIndex = 0;
   for (let i = 0; i < processedLines.length; i++) {
     const line = processedLines[i].trim();
-    // If we find a Header 1 or 2, this is likely the start of the article
-    if (/^#{1,2}\s/.test(line)) {
-      contentStartIndex = i;
-      break;
-    }
-    // Fail-safe: If we hit a long paragraph (over 100 chars) that isn't a link, stop skipping
-    if (line.length > 100 && !line.startsWith('[')) {
+    // Look for first Header 1 or 2, OR a long text block that isn't a link
+    if (/^#{1,2}\s/.test(line) || (line.length > 80 && !line.startsWith('['))) {
       contentStartIndex = i;
       break;
     }
   }
 
-  // Slice off the navigation mess at the top
   let bodyLines = processedLines.slice(contentStartIndex);
-
-  // 4. Filtering Logic
   const cleanedLines: string[] = [];
-  let isFooter = false;
-
+  
+  // ---------------------------------------------------------
+  // 4. Content Filtering (Remove Footer/Noise)
+  // ---------------------------------------------------------
   const noisePatterns = [
     /^Open navigation menu/i,
-    /^\[(Sign up|Log in|Book a call|Pricing|Documentation|Case Studies)\]/i, // Nav items
-    /^!\[.+logo\]/i, // Generic logo images (usually top of page)
-    /^>{1,}\s*$/, // Empty blockquotes
+    /^\[(Sign up|Log in|Book a call|Pricing|Documentation|Case Studies)\]/i,
+    /^!\[.+logo\]/i,
+    /^>{1,}\s*$/, // Empty quotes
   ];
 
-  // Patterns that definitely signal the start of a footer
   const footerTriggers = [
     /^\[Privacy Policy\]/i,
-    /^Need more than \d+k credits/i, // Specific to your example
+    /^Need more than \d+k credits/i,
     /^©\s*\d{4}/,
   ];
+
+  let isFooter = false;
 
   for (let i = 0; i < bodyLines.length; i++) {
     const line = bodyLines[i].trim();
 
-    // STOP if we hit the footer
-    if (footerTriggers.some(p => p.test(line))) {
-      isFooter = true;
-    }
-    // Additional Footer check: High density of short links at the end
-    // If we see 3 lines in a row that are just short links, and we are in the last 20% of the file
+    // Check for footer start
+    if (footerTriggers.some(p => p.test(line))) isFooter = true;
+    
+    // Heuristic: If last 20% of doc and we see 3 consecutive lines of just links -> Footer
     if (!isFooter && i > bodyLines.length * 0.8) {
       if (isLinkLine(line) && isLinkLine(bodyLines[i+1] || '') && isLinkLine(bodyLines[i+2] || '')) {
         isFooter = true;
@@ -207,33 +207,32 @@ function cleanMarkdownContent(markdownContent: string): string {
     }
 
     if (isFooter) break;
-
-    // Skip empty lines (we will re-add them semantically later)
-    if (line === '') continue;
-
-    // Skip specific noise
     if (noisePatterns.some(p => p.test(line))) continue;
 
-    // Skip standalone "CTA" links (buttons) unless they are part of a list
-    // e.g. [Book a call](#calendar) on its own line
-    if (/^\[[^\]]+\]\([^)]+\)$/.test(line) && !line.startsWith('*') && !line.startsWith('-')) {
-      // Allow it if it looks like an image link (often valuable content)
-      if (!line.startsWith('[![')) {
-        continue; 
-      }
+    // Skip standalone CTA links unless they look like content images
+    if (/^\[[^\]]+\]\([^)]+\)$/.test(line) && !line.startsWith('![') && !line.startsWith('*')) {
+      continue; 
     }
 
-    cleanedLines.push(bodyLines[i]); // Push the original line (preserves indentation)
+    cleanedLines.push(line);
   }
 
-  // 5. Final Reassembly with clean spacing
-  // We join with double newlines to ensure Markdown paragraphs render correctly,
-  // then collapse excessive newlines.
-  return cleanedLines
-    .join('\n\n')
-    .replace(/\n{3,}/g, '\n\n') // Max 2 newlines
+  // ---------------------------------------------------------
+  // 5. Final Assembly (The Clean Up)
+  // ---------------------------------------------------------
+  
+  // Join with actual newlines
+  let result = cleanedLines.join('\n');
+
+  // Final Cleanup Regex:
+  // 1. Replace 3+ newlines with 2 (max one empty line between paragraphs)
+  // 2. Ensure NO literal "\n" strings survived
+  return result
+    .replace(/\n{3,}/g, '\n\n') 
+    .replace(/\\n/g, '\n') // One last check for stragglers
     .trim();
-  }
+}
+
 
 // Helper to detect if a line is just a markdown link
 function isLinkLine(line: string): boolean {
