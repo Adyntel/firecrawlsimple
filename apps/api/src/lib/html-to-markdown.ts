@@ -125,168 +125,119 @@ function removeSkipToContentLinks(markdownContent: string): string {
 }
 
 function cleanMarkdownContent(markdownContent: string): string {
-  let lines = markdownContent.split('\n');
-  let cleanedLines: string[] = [];
+  // 1. Initial cleanup: literal newlines and carriage returns
+  let rawLines = markdownContent
+    .replace(/\\n/g, '\n') // Fix literal "\n" strings
+    .split(/\r?\n/);
 
-  // First pass: identify and remove header navigation (before main content)
-  let mainContentIndex = -1;
+  let processedLines: string[] = [];
+  
+  // 2. Normalize Headers (Fixing the "----" and "====" issue)
+  // We look for lines that are purely separators and convert the PREVIOUS line to a header
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i].trim();
+    const nextLine = rawLines[i + 1] ? rawLines[i + 1].trim() : '';
 
-  // Find where main content starts (first real heading with substantial text)
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    // Main content typically starts with an h1 that has descriptive text (more than 3 words)
-    if (/^#{1,2}\s+.+/.test(line)) {
-      const headingText = line.replace(/^#+\s*/, '');
-      const wordCount = headingText.split(/\s+/).length;
-      // Skip single-word or very short headings that are likely navigation
-      if (wordCount >= 3 && !isNavigationHeading(headingText)) {
-        mainContentIndex = i;
-        break;
-      }
+    // Convert "Title \n ====" to "# Title"
+    if (/^={3,}$/.test(nextLine) && line.length > 0) {
+      processedLines.push(`# ${line}`);
+      i++; // Skip the separator line
+    }
+    // Convert "Subtitle \n ----" to "## Subtitle"
+    else if (/^-{3,}$/.test(nextLine) && line.length > 0) {
+      processedLines.push(`## ${line}`);
+      i++; // Skip the separator line
+    }
+    else {
+      processedLines.push(rawLines[i]);
     }
   }
 
-  // If we found main content, skip everything before it
-  const startIndex = mainContentIndex > 0 ? mainContentIndex : 0;
+  // 3. Identify the "Real" Start of Content
+  // We look for the first H1 (#) or H2 (##) that isn't a link
+  let contentStartIndex = 0;
+  for (let i = 0; i < processedLines.length; i++) {
+    const line = processedLines[i].trim();
+    // If we find a Header 1 or 2, this is likely the start of the article
+    if (/^#{1,2}\s/.test(line)) {
+      contentStartIndex = i;
+      break;
+    }
+    // Fail-safe: If we hit a long paragraph (over 100 chars) that isn't a link, stop skipping
+    if (line.length > 100 && !line.startsWith('[')) {
+      contentStartIndex = i;
+      break;
+    }
+  }
 
-  // Patterns for lines that should always be removed
-  const removePatterns = [
-    // Navigation anchors
-    /^\[Navigation\]\(#\)/i,
-    /^\[Skip to \w+\]/i,
-    /^\[Menu\]\(#\)/i,
+  // Slice off the navigation mess at the top
+  let bodyLines = processedLines.slice(contentStartIndex);
 
-    // Empty link brackets or single-word nav links at line start
-    /^\[\w{1,15}\]\(#\)$/,  // [Word](#) - hash-only links
+  // 4. Filtering Logic
+  const cleanedLines: string[] = [];
+  let isFooter = false;
 
-    // JavaScript void links
-    /javascript:void\(0\)/i,
-
-    // Social media icon links (empty text)
-    /^\[\]\(https?:\/\/(www\.)?(facebook|twitter|x\.com|instagram|linkedin|youtube|bsky\.app|github\.com)/i,
-
-    // Cookie/privacy notices
-    /^(We use cookies|This site uses cookies|Accept all cookies|Cookie settings)/i,
-
-    // Email signup prompts
-    /^(Updates about .+, discounts|Free email course|Subscribe to our|Sign up for our|Enter your email)/i,
-    /^I have read and accept the/i,
-
-    // Generic promotional/modal text
-    /^(Your trial is downloading|Thank you for subscribing|Want to win|Try .+ for Free)/i,
-    /^Please check your email/i,
-    /^Close$/,
+  const noisePatterns = [
+    /^Open navigation menu/i,
+    /^\[(Sign up|Log in|Book a call|Pricing|Documentation|Case Studies)\]/i, // Nav items
+    /^!\[.+logo\]/i, // Generic logo images (usually top of page)
+    /^>{1,}\s*$/, // Empty blockquotes
   ];
 
-  // Patterns for footer-like link lists (typically short navigational links)
-  const footerLinkPatterns = [
-    /^\*\s*\[(Releases|Developers|Designers|Teams|Enterprise|Students|Teachers|Universities)\]/i,
-    /^\*\s*\[(About|Press|Jobs|Careers|Contact|Blog|Help|FAQ)\]/i,
-    /^\*\s*\[(Privacy Policy|Terms|License|Legal|Imprint|Impressum)\]/i,
-    /^\*\s*\[(Download for|Get Started|Sign Up|Log In|Register)\]/i,
-    /^\*\s*\[(Code Diff|\.gitignore|Free Tools)\]/i,
+  // Patterns that definitely signal the start of a footer
+  const footerTriggers = [
+    /^\[Privacy Policy\]/i,
+    /^Need more than \d+k credits/i, // Specific to your example
+    /^©\s*\d{4}/,
   ];
 
-  // Patterns for standalone CTA buttons (links on their own line)
-  const ctaPatterns = [
-    /^\[(Download|Get Started|Try|Start|Sign Up|Learn More|Read More|Explore|View|See)\s/i,
-    /^\[Also available for/i,
-  ];
+  for (let i = 0; i < bodyLines.length; i++) {
+    const line = bodyLines[i].trim();
 
-  let inFooterSection = false;
-  let footerLinkCount = 0;
-
-  for (let i = startIndex; i < lines.length; i++) {
-    const line = lines[i].trim();
-    const originalLine = lines[i];
-
-    // Skip empty lines at the very start
-    if (cleanedLines.length === 0 && line === '') {
-      continue;
+    // STOP if we hit the footer
+    if (footerTriggers.some(p => p.test(line))) {
+      isFooter = true;
     }
-
-    // Check if line matches removal patterns
-    if (removePatterns.some(pattern => pattern.test(line))) {
-      continue;
-    }
-
-    // Detect footer section by consecutive footer-like links
-    if (footerLinkPatterns.some(pattern => pattern.test(line))) {
-      footerLinkCount++;
-      if (footerLinkCount >= 2) {
-        inFooterSection = true;
-      }
-      continue;
-    }
-
-    // Reset footer detection if we hit non-footer content
-    if (line !== '' && !footerLinkPatterns.some(pattern => pattern.test(line))) {
-      // But if we're deep in footer, keep skipping
-      if (inFooterSection) {
-        // Check if this looks like footer content (short link lists, copyright, etc.)
-        if (/^\*\s*\[.{1,30}\]\(/.test(line) || /^©/.test(line) || line === '') {
-          continue;
-        }
-        // Real content might reset footer mode
-        if (/^#{1,3}\s+.{20,}/.test(line)) {
-          inFooterSection = false;
-          footerLinkCount = 0;
-        } else {
-          continue;
-        }
-      } else {
-        footerLinkCount = 0;
+    // Additional Footer check: High density of short links at the end
+    // If we see 3 lines in a row that are just short links, and we are in the last 20% of the file
+    if (!isFooter && i > bodyLines.length * 0.8) {
+      if (isLinkLine(line) && isLinkLine(bodyLines[i+1] || '') && isLinkLine(bodyLines[i+2] || '')) {
+        isFooter = true;
       }
     }
 
-    // Skip standalone CTA links (but keep them if part of a paragraph)
-    if (ctaPatterns.some(pattern => pattern.test(line))) {
-      // Check if previous line was empty or this is isolated
-      const prevLine = cleanedLines.length > 0 ? cleanedLines[cleanedLines.length - 1].trim() : '';
-      if (prevLine === '' || /^\[.+\]\(.+\)$/.test(line)) {
-        continue;
+    if (isFooter) break;
+
+    // Skip empty lines (we will re-add them semantically later)
+    if (line === '') continue;
+
+    // Skip specific noise
+    if (noisePatterns.some(p => p.test(line))) continue;
+
+    // Skip standalone "CTA" links (buttons) unless they are part of a list
+    // e.g. [Book a call](#calendar) on its own line
+    if (/^\[[^\]]+\]\([^)]+\)$/.test(line) && !line.startsWith('*') && !line.startsWith('-')) {
+      // Allow it if it looks like an image link (often valuable content)
+      if (!line.startsWith('[![')) {
+        continue; 
       }
     }
 
-    // Skip copyright lines
-    if (/^©\s*\d{4}/.test(line)) {
-      continue;
-    }
-
-    // Skip lines that are just a single short link (likely navigation)
-    if (/^\[.{1,20}\]\([^)]+\)$/.test(line) && cleanedLines.length < 3) {
-      continue;
-    }
-
-    cleanedLines.push(originalLine);
+    cleanedLines.push(bodyLines[i]); // Push the original line (preserves indentation)
   }
 
-  // Remove trailing empty lines
-  while (cleanedLines.length > 0 && cleanedLines[cleanedLines.length - 1].trim() === '') {
-    cleanedLines.pop();
+  // 5. Final Reassembly with clean spacing
+  // We join with double newlines to ensure Markdown paragraphs render correctly,
+  // then collapse excessive newlines.
+  return cleanedLines
+    .join('\n\n')
+    .replace(/\n{3,}/g, '\n\n') // Max 2 newlines
+    .trim();
   }
 
-  // Remove excessive consecutive empty lines (more than 2)
-  let result: string[] = [];
-  let consecutiveEmpty = 0;
-  for (const line of cleanedLines) {
-    if (line.trim() === '') {
-      consecutiveEmpty++;
-      if (consecutiveEmpty <= 2) {
-        result.push(line);
-      }
-    } else {
-      consecutiveEmpty = 0;
-      result.push(line);
-    }
-  }
-
-  let finalResult = result.join('\n');
-
-  // Replace literal \n with actual newlines
-  finalResult = finalResult.replace(/\\n/g, '\n');
-
-  return finalResult;
+// Helper to detect if a line is just a markdown link
+function isLinkLine(line: string): boolean {
+  return /^\[.*\]\(.*\)\s*$/.test(line.trim());
 }
 
 function isNavigationHeading(text: string): boolean {
