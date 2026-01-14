@@ -3,6 +3,7 @@ import { z } from "zod";
 import { PageOptions } from "../../lib/entities";
 import { protocolIncluded, checkUrl } from "../../lib/validateUrl";
 import { PlanType } from "../../types";
+import { convertMarkdownToPlainText } from "../../lib/html-to-markdown";
 
 export type Format = "markdown" | "rawHtml" | "screenshot";
 
@@ -120,6 +121,7 @@ export type MapRequest = z.infer<typeof mapRequestSchema>;
 
 export type Document = {
   markdown?: string;
+  clean_text?: string;
   extract?: string;
   html?: string;
   rawHtml?: string;
@@ -280,6 +282,7 @@ export function legacyDocumentConverter(doc: any): Document {
 
   return {
     markdown: doc.markdown,
+    clean_text: doc.markdown ? convertMarkdownToPlainText(doc.markdown) : undefined,
     links: doc.linksOnPage.filter((x: any) => x !== null),
     rawHtml: doc.rawHtml,
     html: doc.html,

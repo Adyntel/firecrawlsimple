@@ -239,6 +239,90 @@ function isLinkLine(line: string): boolean {
   return /^\[.*\]\(.*\)\s*$/.test(line.trim());
 }
 
+/**
+ * Converts markdown content to plain text by stripping all markdown formatting.
+ * This produces text similar to what you'd get by copy-pasting from a website.
+ */
+export function convertMarkdownToPlainText(markdown: string): string {
+  if (!markdown) {
+    return "";
+  }
+
+  let text = markdown;
+
+  // Remove images: ![alt](url) or ![alt]
+  text = text.replace(/!\[[^\]]*\]\([^)]*\)/g, "");
+  text = text.replace(/!\[[^\]]*\]/g, "");
+
+  // Convert links to just text: [text](url) -> text
+  text = text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+
+  // Remove reference-style links: [text][ref] -> text
+  text = text.replace(/\[([^\]]*)\]\[[^\]]*\]/g, "$1");
+
+  // Remove reference definitions: [ref]: url
+  text = text.replace(/^\[[^\]]*\]:\s*.*$/gm, "");
+
+  // Remove headers: # Header -> Header
+  text = text.replace(/^#{1,6}\s+/gm, "");
+
+  // Remove bold: **text** or __text__ -> text
+  text = text.replace(/\*\*([^*]+)\*\*/g, "$1");
+  text = text.replace(/__([^_]+)__/g, "$1");
+
+  // Remove italic: *text* or _text_ -> text
+  text = text.replace(/\*([^*]+)\*/g, "$1");
+  text = text.replace(/_([^_]+)_/g, "$1");
+
+  // Remove strikethrough: ~~text~~ -> text
+  text = text.replace(/~~([^~]+)~~/g, "$1");
+
+  // Remove inline code: `code` -> code
+  text = text.replace(/`([^`]+)`/g, "$1");
+
+  // Remove code blocks: ```code``` or ~~~code~~~
+  text = text.replace(/```[\s\S]*?```/g, "");
+  text = text.replace(/~~~[\s\S]*?~~~/g, "");
+
+  // Remove indented code blocks (4 spaces or tab at start)
+  text = text.replace(/^(?:[ ]{4}|\t).+$/gm, "");
+
+  // Remove blockquotes: > text -> text
+  text = text.replace(/^>\s*/gm, "");
+
+  // Remove horizontal rules: ---, ***, ___
+  text = text.replace(/^[-*_]{3,}\s*$/gm, "");
+
+  // Convert unordered list items: * item or - item or + item -> item
+  text = text.replace(/^[\s]*[-*+]\s+/gm, "");
+
+  // Convert ordered list items: 1. item -> item
+  text = text.replace(/^[\s]*\d+\.\s+/gm, "");
+
+  // Remove HTML tags
+  text = text.replace(/<[^>]+>/g, "");
+
+  // Remove escaped characters: \* -> *
+  text = text.replace(/\\([\\`*_{}[\]()#+\-.!])/g, "$1");
+
+  // Normalize whitespace: collapse multiple spaces to single space
+  text = text.replace(/[ \t]+/g, " ");
+
+  // Normalize newlines: collapse 3+ newlines to 2 (one blank line)
+  text = text.replace(/\n{3,}/g, "\n\n");
+
+  // Trim each line
+  text = text
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n");
+
+  // Remove empty lines at start and end
+  text = text.trim();
+
+  return text;
+}
+
 function isNavigationHeading(text: string): boolean {
   const navHeadings = [
     /^navigation$/i,
