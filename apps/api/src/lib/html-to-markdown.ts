@@ -306,19 +306,13 @@ export function convertMarkdownToPlainText(markdown: string): string {
   // Remove escaped characters: \* -> *
   text = text.replace(/\\([\\`*_{}[\]()#+\-.!])/g, "$1");
 
+  // Replace all newlines with spaces to get continuous text
+  text = text.replace(/\n+/g, " ");
+
   // Normalize whitespace: collapse multiple spaces to single space
   text = text.replace(/[ \t]+/g, " ");
 
-  // Normalize newlines: collapse 3+ newlines to 2 (one blank line)
-  text = text.replace(/\n{3,}/g, "\n\n");
-
-  // Trim each line
-  text = text
-    .split("\n")
-    .map((line) => line.trim())
-    .join("\n");
-
-  // Remove empty lines at start and end
+  // Trim whitespace at start and end
   text = text.trim();
 
   return text;
