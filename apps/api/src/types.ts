@@ -33,6 +33,7 @@ export interface WebScraperOptions {
   webhookMetadata?: any;
   v1?: boolean;
   is_scrape?: boolean;
+  enableAutoCrawl?: boolean;
 }
 
 export interface RunWebScraperParams {

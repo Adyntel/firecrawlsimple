@@ -108,7 +108,7 @@ const workerFun = async (
 
     const job = await worker.getNextJob(token);
     if (job) {
-      processJobInternal(token, job);
+      await processJobInternal(token, job);
 
       await sleep(gotJobInterval);
     } else {
@@ -181,7 +181,8 @@ async function processJob(job: Job, token: string) {
 
       const sc = (await getCrawl(job.data.crawl_id)) as StoredCrawl;
 
-      if (!job.data.sitemapped) {
+      // Only auto-crawl if explicitly enabled
+      if (job.data.enableAutoCrawl && !job.data.sitemapped) {
         if (!sc.cancelled) {
           const crawler = crawlToCrawler(job.data.crawl_id, sc);
 
@@ -210,6 +211,7 @@ async function processJob(job: Job, token: string) {
                   origin: job.data.origin,
                   crawl_id: job.data.crawl_id,
                   v1: job.data.v1,
+                  enableAutoCrawl: job.data.enableAutoCrawl,
                 },
                 {},
                 uuidv4(),
