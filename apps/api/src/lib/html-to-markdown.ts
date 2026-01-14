@@ -255,7 +255,8 @@ export function convertMarkdownToPlainText(markdown: string): string {
   text = text.replace(/!\[[^\]]*\]/g, "");
 
   // Convert links to just text: [text](url) -> text
-  text = text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+  // Handle URLs with nested parentheses like javascript:void(0);
+  text = text.replace(/\[([^\]]*)\]\([^)]*(?:\([^)]*\)[^)]*)*\)/g, "$1");
 
   // Remove reference-style links: [text][ref] -> text
   text = text.replace(/\[([^\]]*)\]\[[^\]]*\]/g, "$1");
