@@ -127,116 +127,138 @@ function removeSkipToContentLinks(markdownContent: string): string {
 function cleanMarkdownContent(markdownContent: string): string {
   let lines = markdownContent.split('\n');
   let cleanedLines: string[] = [];
-  let inNavigation = false;
-  let inFooter = false;
-  let inModal = false;
 
-  // Patterns to identify sections to remove
-  const navigationPatterns = [
-    /^#+\s*Navigation/i,
-    /^\*\s*\[Features\]/i,
-    /^\*\s*\[Pricing\]/i,
-    /^\*\s*\[Support\]/i,
-    /^\*\s*\[Learn\s+\w+\]/i,
-    /^\*\s*\[Blog\]/i,
-    /^\*\s*\[Download\]/i,
-  ];
+  // First pass: identify and remove header navigation (before main content)
+  let mainContentIndex = -1;
 
-  const footerPatterns = [
-    /^#+\s*(Tower Git Client|Use Cases|Features|Free Tools|Support|Company|Legal)/i,
-    /^\*\s*\[Download for/i,
-    /^\*\s*\[About\]/i,
-    /^\*\s*\[Press\]/i,
-    /^\*\s*\[Jobs\]/i,
-    /^\*\s*\[Privacy Policy\]/i,
-    /^\*\s*\[License Agreement\]/i,
-    /^©\s*\d{4}/i,
-  ];
-
-  const modalPatterns = [
-    /^(Your trial is downloading|Updates, Courses & Content via Email|Thank you for subscribing|Want to win|Try Tower for Free)/i,
-    /^I have read and accept the/i,
-    /^Please check your email/i,
-    /^Close$/i,
-  ];
-
-  // Track main content start
-  let mainContentStarted = false;
-  let emptyLineCount = 0;
-
+  // Find where main content starts (first real heading with substantial text)
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
+    // Main content typically starts with an h1 that has descriptive text (more than 3 words)
+    if (/^#{1,2}\s+.+/.test(line)) {
+      const headingText = line.replace(/^#+\s*/, '');
+      const wordCount = headingText.split(/\s+/).length;
+      // Skip single-word or very short headings that are likely navigation
+      if (wordCount >= 3 && !isNavigationHeading(headingText)) {
+        mainContentIndex = i;
+        break;
+      }
+    }
+  }
 
-    // Skip empty lines at the start
-    if (!mainContentStarted && line === '') {
+  // If we found main content, skip everything before it
+  const startIndex = mainContentIndex > 0 ? mainContentIndex : 0;
+
+  // Patterns for lines that should always be removed
+  const removePatterns = [
+    // Navigation anchors
+    /^\[Navigation\]\(#\)/i,
+    /^\[Skip to \w+\]/i,
+    /^\[Menu\]\(#\)/i,
+
+    // Empty link brackets or single-word nav links at line start
+    /^\[\w{1,15}\]\(#\)$/,  // [Word](#) - hash-only links
+
+    // JavaScript void links
+    /javascript:void\(0\)/i,
+
+    // Social media icon links (empty text)
+    /^\[\]\(https?:\/\/(www\.)?(facebook|twitter|x\.com|instagram|linkedin|youtube|bsky\.app|github\.com)/i,
+
+    // Cookie/privacy notices
+    /^(We use cookies|This site uses cookies|Accept all cookies|Cookie settings)/i,
+
+    // Email signup prompts
+    /^(Updates about .+, discounts|Free email course|Subscribe to our|Sign up for our|Enter your email)/i,
+    /^I have read and accept the/i,
+
+    // Generic promotional/modal text
+    /^(Your trial is downloading|Thank you for subscribing|Want to win|Try .+ for Free)/i,
+    /^Please check your email/i,
+    /^Close$/,
+  ];
+
+  // Patterns for footer-like link lists (typically short navigational links)
+  const footerLinkPatterns = [
+    /^\*\s*\[(Releases|Developers|Designers|Teams|Enterprise|Students|Teachers|Universities)\]/i,
+    /^\*\s*\[(About|Press|Jobs|Careers|Contact|Blog|Help|FAQ)\]/i,
+    /^\*\s*\[(Privacy Policy|Terms|License|Legal|Imprint|Impressum)\]/i,
+    /^\*\s*\[(Download for|Get Started|Sign Up|Log In|Register)\]/i,
+    /^\*\s*\[(Code Diff|\.gitignore|Free Tools)\]/i,
+  ];
+
+  // Patterns for standalone CTA buttons (links on their own line)
+  const ctaPatterns = [
+    /^\[(Download|Get Started|Try|Start|Sign Up|Learn More|Read More|Explore|View|See)\s/i,
+    /^\[Also available for/i,
+  ];
+
+  let inFooterSection = false;
+  let footerLinkCount = 0;
+
+  for (let i = startIndex; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const originalLine = lines[i];
+
+    // Skip empty lines at the very start
+    if (cleanedLines.length === 0 && line === '') {
       continue;
     }
 
-    // Check if we're entering a navigation section
-    if (navigationPatterns.some(pattern => pattern.test(line))) {
-      inNavigation = true;
+    // Check if line matches removal patterns
+    if (removePatterns.some(pattern => pattern.test(line))) {
       continue;
     }
 
-    // Check if we're entering a footer section
-    if (footerPatterns.some(pattern => pattern.test(line))) {
-      inFooter = true;
-      continue;
-    }
-
-    // Check if we're in a modal/popup section
-    if (modalPatterns.some(pattern => pattern.test(line))) {
-      inModal = true;
-      continue;
-    }
-
-    // Exit navigation/footer after several empty lines or a main heading
-    if ((inNavigation || inFooter || inModal) && line === '') {
-      emptyLineCount++;
-      if (emptyLineCount > 2) {
-        inNavigation = false;
-        inFooter = false;
-        inModal = false;
-        emptyLineCount = 0;
+    // Detect footer section by consecutive footer-like links
+    if (footerLinkPatterns.some(pattern => pattern.test(line))) {
+      footerLinkCount++;
+      if (footerLinkCount >= 2) {
+        inFooterSection = true;
       }
       continue;
-    } else if (line !== '') {
-      emptyLineCount = 0;
     }
 
-    // Check for main content headers (usually h1 or h2)
-    if (/^#{1,2}\s+The most powerful/.test(line) ||
-        /^#{1,2}\s+Git Made Easy/.test(line) ||
-        /^#{1,2}\s+All of Git's Power/.test(line) ||
-        /^#{1,2}\s+Software With Productivity/.test(line)) {
-      inNavigation = false;
-      inFooter = false;
-      inModal = false;
-      mainContentStarted = true;
+    // Reset footer detection if we hit non-footer content
+    if (line !== '' && !footerLinkPatterns.some(pattern => pattern.test(line))) {
+      // But if we're deep in footer, keep skipping
+      if (inFooterSection) {
+        // Check if this looks like footer content (short link lists, copyright, etc.)
+        if (/^\*\s*\[.{1,30}\]\(/.test(line) || /^©/.test(line) || line === '') {
+          continue;
+        }
+        // Real content might reset footer mode
+        if (/^#{1,3}\s+.{20,}/.test(line)) {
+          inFooterSection = false;
+          footerLinkCount = 0;
+        } else {
+          continue;
+        }
+      } else {
+        footerLinkCount = 0;
+      }
     }
 
-    // Skip lines that are in navigation, footer, or modal sections
-    if (inNavigation || inFooter || inModal) {
+    // Skip standalone CTA links (but keep them if part of a paragraph)
+    if (ctaPatterns.some(pattern => pattern.test(line))) {
+      // Check if previous line was empty or this is isolated
+      const prevLine = cleanedLines.length > 0 ? cleanedLines[cleanedLines.length - 1].trim() : '';
+      if (prevLine === '' || /^\[.+\]\(.+\)$/.test(line)) {
+        continue;
+      }
+    }
+
+    // Skip copyright lines
+    if (/^©\s*\d{4}/.test(line)) {
       continue;
     }
 
-    // Remove javascript void links
-    if (line.includes('javascript:void(0)')) {
+    // Skip lines that are just a single short link (likely navigation)
+    if (/^\[.{1,20}\]\([^)]+\)$/.test(line) && cleanedLines.length < 3) {
       continue;
     }
 
-    // Remove "Also available for" links
-    if (/^\[Also available for/i.test(line)) {
-      continue;
-    }
-
-    // Remove social media icon links (empty links)
-    if (/^\[\]\(https?:\/\/(www\.)?(facebook|twitter|x\.com|instagram|linkedin|youtube|bsky\.app)/i.test(line)) {
-      continue;
-    }
-
-    mainContentStarted = true;
-    cleanedLines.push(lines[i]); // Keep original formatting/indentation
+    cleanedLines.push(originalLine);
   }
 
   // Remove trailing empty lines
@@ -259,5 +281,22 @@ function cleanMarkdownContent(markdownContent: string): string {
     }
   }
 
-  return result.join('\n');
+  let finalResult = result.join('\n');
+
+  // Replace literal \n with actual newlines
+  finalResult = finalResult.replace(/\\n/g, '\n');
+
+  return finalResult;
+}
+
+function isNavigationHeading(text: string): boolean {
+  const navHeadings = [
+    /^navigation$/i,
+    /^menu$/i,
+    /^main menu$/i,
+    /^site navigation$/i,
+    /^footer$/i,
+    /^header$/i,
+  ];
+  return navHeadings.some(pattern => pattern.test(text.trim()));
 }

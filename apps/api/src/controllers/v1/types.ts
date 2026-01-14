@@ -55,7 +55,7 @@ export const scrapeOptions = z
       .enum(["markdown", "rawHtml", "screenshot"])
       .array()
       .optional()
-      .default(["markdown", "rawHtml"]),
+      .default(["markdown"]),
     headers: z.record(z.string(), z.string()).optional(),
     includeTags: z.string().array().optional(),
     excludeTags: z.string().array().optional(),
