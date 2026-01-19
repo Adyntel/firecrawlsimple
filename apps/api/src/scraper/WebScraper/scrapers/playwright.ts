@@ -1,6 +1,5 @@
 import axios from "axios";
 import { generateRequestParams } from "../single_url";
-import { universalTimeout } from "../global";
 import { Logger } from "../../../lib/logger";
 
 /**
@@ -41,13 +40,14 @@ export async function scrapeWithPlaywright(
       {
         url: url,
         wait_after_load: waitParam,
+        timeout: 20000,
         headers: headers,
       },
       {
         headers: {
           "Content-Type": "application/json",
         },
-        timeout: universalTimeout + waitParam,
+        timeout: 20000,
         transformResponse: [(data) => data],
       }
     );
@@ -95,7 +95,7 @@ export async function scrapeWithPlaywright(
     if (error.code === "ECONNABORTED") {
       logParams.error_message = "Request timed out";
       Logger.error(`❌ Playwright: Request timed out for ${url}`);
-      Logger.error(`⏱️ Timeout was set to: ${universalTimeout + waitParam}ms`);
+      Logger.error(`⏱️ Timeout was set to: 20000ms`);
     } else if (error.response) {
       // Server responded with error status
       logParams.error_message = error.message || error;
