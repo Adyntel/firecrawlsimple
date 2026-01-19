@@ -17,6 +17,41 @@ const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3003;
 let heroCore: HeroCore;
 let connectionToCore: ConnectionToHeroCore;
 
+/** Limits concurrent scrape runs. MAX_CONCURRENCY (default 10) controls how many Hero scrapes run at once. Requests wait for a free slot when at capacity. */
+class Semaphore {
+  private permits: number;
+  private waitQueue: Array<() => void> = [];
+
+  constructor(max: number) {
+    this.permits = Math.max(1, Math.min(100, max));
+  }
+
+  async acquire(): Promise<void> {
+    if (this.permits > 0) {
+      this.permits--;
+      return;
+    }
+    return new Promise((resolve) => {
+      this.waitQueue.push(() => {
+        this.permits--;
+        resolve();
+      });
+    });
+  }
+
+  release(): void {
+    this.permits++;
+    const next = this.waitQueue.shift();
+    if (next) {
+      this.permits--;
+      next();
+    }
+  }
+}
+
+const maxConcurrency = Math.max(1, Math.min(100, parseInt(process.env.MAX_CONCURRENCY || "10", 10) || 10));
+const scrapeSemaphore = new Semaphore(maxConcurrency);
+
 setupOpenAPI(app);
 
 app.use(bodyParser.json());
@@ -261,6 +296,7 @@ app.post("/scrape", async (req: Request, res: Response) => {
     }
   };
 
+  await scrapeSemaphore.acquire();
   try {
     ({ pageContent, pageStatusCode } = await attemptScrape());
   } catch (error) {
@@ -269,6 +305,8 @@ app.post("/scrape", async (req: Request, res: Response) => {
       error: "Failed to scrape the page",
       details: error instanceof Error ? error.message : String(error),
     });
+  } finally {
+    scrapeSemaphore.release();
   }
 
   const errorMessage = getError(pageStatusCode);
@@ -326,6 +364,8 @@ process.on("SIGTERM", shutdown);
 
 (async () => {
   await initializeHeroCore();
+
+  console.log(`MAX_CONCURRENCY=${maxConcurrency}`);
 
   app.listen(port, () => {
     console.log(`Server is running on port ${port}`);

@@ -117,7 +117,11 @@ const workerFun = async (
   }
 };
 
-workerFun(scrapeQueueName, processJobInternal);
+const numWorkers = Math.max(1, parseInt(process.env.NUM_WORKERS_PER_QUEUE || "1", 10));
+Logger.info(`Starting ${numWorkers} worker(s) for queue ${scrapeQueueName}`);
+for (let i = 0; i < numWorkers; i++) {
+  workerFun(scrapeQueueName, processJobInternal);
+}
 
 async function processJob(job: Job, token: string) {
   Logger.info(`🐂 Worker taking job ${job.id}`);
