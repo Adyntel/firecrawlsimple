@@ -11,6 +11,15 @@ import { setupOpenAPI } from "./openapi";
 
 dotenv.config();
 
+function usageLog(
+  component: string,
+  data: Record<string, string | number | boolean | null | undefined>
+) {
+  console.log(
+    `[USAGE:${component}] ${JSON.stringify({ ts: new Date().toISOString(), ...data })}`
+  );
+}
+
 const app = express();
 const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3003;
 
@@ -20,10 +29,20 @@ let connectionToCore: ConnectionToHeroCore;
 /** Limits concurrent scrape runs. MAX_CONCURRENCY (default 10) controls how many Hero scrapes run at once. Requests wait for a free slot when at capacity. */
 class Semaphore {
   private permits: number;
+  private readonly maxPermits: number;
   private waitQueue: Array<() => void> = [];
 
   constructor(max: number) {
-    this.permits = Math.max(1, Math.min(100, max));
+    this.maxPermits = Math.max(1, Math.min(100, max));
+    this.permits = this.maxPermits;
+  }
+
+  getStats(): { active: number; waiting: number; max: number } {
+    return {
+      active: this.maxPermits - this.permits,
+      waiting: this.waitQueue.length,
+      max: this.maxPermits,
+    };
   }
 
   async acquire(): Promise<void> {
@@ -51,6 +70,28 @@ class Semaphore {
 
 const maxConcurrency = Math.max(1, Math.min(100, parseInt(process.env.MAX_CONCURRENCY || "10", 10) || 10));
 const scrapeSemaphore = new Semaphore(maxConcurrency);
+
+// Usage counters for periodic capacity logs (reset every 60s)
+let scrapesSuccess60 = 0;
+let scrapesFailed60 = 0;
+let totalScrapeMs60 = 0;
+let totalWaitMs60 = 0;
+setInterval(() => {
+  const n = scrapesSuccess60 + scrapesFailed60;
+  const stats = scrapeSemaphore.getStats();
+  usageLog("puppeteer", {
+    event: "periodic",
+    scrapes_success: scrapesSuccess60,
+    scrapes_failed: scrapesFailed60,
+    avg_scrape_ms: n ? Math.round(totalScrapeMs60 / n) : 0,
+    avg_wait_ms: n ? Math.round(totalWaitMs60 / n) : 0,
+    ...stats,
+  });
+  scrapesSuccess60 = 0;
+  scrapesFailed60 = 0;
+  totalScrapeMs60 = 0;
+  totalWaitMs60 = 0;
+}, 60000);
 
 setupOpenAPI(app);
 
@@ -296,17 +337,34 @@ app.post("/scrape", async (req: Request, res: Response) => {
     }
   };
 
+  const acquireStart = Date.now();
   await scrapeSemaphore.acquire();
+  const waitMs = Date.now() - acquireStart;
+  const scrapeStart = Date.now();
+  let scrapeSuccess = true;
   try {
     ({ pageContent, pageStatusCode } = await attemptScrape());
   } catch (error) {
+    scrapeSuccess = false;
     console.error("Scraping error:", error);
     return res.status(500).json({
       error: "Failed to scrape the page",
       details: error instanceof Error ? error.message : String(error),
     });
   } finally {
+    const scrapeMs = Date.now() - scrapeStart;
+    scrapesSuccess60 += scrapeSuccess ? 1 : 0;
+    scrapesFailed60 += scrapeSuccess ? 0 : 1;
+    totalScrapeMs60 += scrapeMs;
+    totalWaitMs60 += waitMs;
     scrapeSemaphore.release();
+    usageLog("puppeteer", {
+      event: "scrape_done",
+      duration_ms: scrapeMs,
+      wait_ms: waitMs,
+      success: scrapeSuccess,
+      ...scrapeSemaphore.getStats(),
+    });
   }
 
   const errorMessage = getError(pageStatusCode);
@@ -366,6 +424,7 @@ process.on("SIGTERM", shutdown);
   await initializeHeroCore();
 
   console.log(`MAX_CONCURRENCY=${maxConcurrency}`);
+  usageLog("puppeteer", { event: "startup", max_concurrency: maxConcurrency, port });
 
   app.listen(port, () => {
     console.log(`Server is running on port ${port}`);

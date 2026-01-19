@@ -60,4 +60,13 @@ export class Logger {
   static trace(message: string) {
     Logger.log(message, LogLevel.TRACE);
   }
+
+  /** Structured usage/capacity log for analysis. Prefix [USAGE:component] and JSON payload. */
+  static usage(
+    component: string,
+    data: Record<string, string | number | boolean | null | undefined>
+  ) {
+    const payload = { ts: new Date().toISOString(), ...data };
+    console.log(`[USAGE:${component}] ${JSON.stringify(payload)}`);
+  }
 }

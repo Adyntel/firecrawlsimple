@@ -43,6 +43,25 @@ if (cluster.isPrimary) {
       cluster.fork();
     }
   });
+
+  // Periodic queue usage (once in primary to avoid duplicate logs)
+  setInterval(async () => {
+    try {
+      const q = getScrapeQueue();
+      const c = await q.getJobCounts();
+      Logger.usage("main", {
+        event: "periodic",
+        waiting: c.waiting,
+        active: c.active,
+        completed: c.completed,
+        failed: c.failed,
+        delayed: c.delayed,
+        paused: c.paused,
+      });
+    } catch (e) {
+      Logger.error("main usage periodic: " + (e instanceof Error ? e.message : e));
+    }
+  }, 60000);
 } else {
   const ws = expressWs(express());
   const app = ws.app;

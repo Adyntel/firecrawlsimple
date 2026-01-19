@@ -46,6 +46,22 @@ const connectionMonitorInterval =
   Number(process.env.CONNECTION_MONITOR_INTERVAL) || 10;
 const gotJobInterval = Number(process.env.CONNECTION_MONITOR_INTERVAL) || 20;
 
+// Usage counters for periodic capacity logs (reset every 60s)
+let jobsCompleted60 = 0;
+let jobsFailed60 = 0;
+let resourceRejected60 = 0;
+setInterval(() => {
+  Logger.usage("worker", {
+    event: "periodic",
+    jobs_completed: jobsCompleted60,
+    jobs_failed: jobsFailed60,
+    resource_rejected: resourceRejected60,
+  });
+  jobsCompleted60 = 0;
+  jobsFailed60 = 0;
+  resourceRejected60 = 0;
+}, 60000);
+
 const processJobInternal = async (token: string, job: Job) => {
   const extendLockInterval = setInterval(async () => {
     Logger.info(`🐂 Worker extending lock on job ${job.id}`);
@@ -101,7 +117,7 @@ const workerFun = async (
     const token = uuidv4();
     const canAcceptConnection = await monitor.acceptConnection();
     if (!canAcceptConnection) {
-      console.log("Cant accept connection");
+      resourceRejected60 += 1;
       await sleep(cantAcceptConnectionInterval);
       continue;
     }
@@ -119,12 +135,22 @@ const workerFun = async (
 
 const numWorkers = Math.max(1, parseInt(process.env.NUM_WORKERS_PER_QUEUE || "1", 10));
 Logger.info(`Starting ${numWorkers} worker(s) for queue ${scrapeQueueName}`);
+Logger.usage("worker", { event: "startup", num_workers: numWorkers, queue: scrapeQueueName });
 for (let i = 0; i < numWorkers; i++) {
   workerFun(scrapeQueueName, processJobInternal);
 }
 
 async function processJob(job: Job, token: string) {
+  const start = Date.now();
   Logger.info(`🐂 Worker taking job ${job.id}`);
+
+  const countsStart = await getScrapeQueue().getJobCounts();
+  Logger.usage("worker", {
+    event: "job_start",
+    job_id: String(job.id),
+    queue_waiting: countsStart.waiting,
+    queue_active: countsStart.active,
+  });
 
   if (
     job.data.url &&
@@ -140,6 +166,16 @@ async function processJob(job: Job, token: string) {
       error:
         "URL is blocked. Suspecious activity detected. Please contact hello@firecrawl.com if you believe this is an error.",
     };
+    const cBlock = await getScrapeQueue().getJobCounts();
+    Logger.usage("worker", {
+      event: "job_done",
+      job_id: String(job.id),
+      success: false,
+      duration_ms: Date.now() - start,
+      queue_waiting: cBlock.waiting,
+      queue_active: cBlock.active,
+      blocked: true,
+    });
     await job.moveToCompleted(data.docs, token, false);
     return data;
   }
@@ -151,7 +187,6 @@ async function processJob(job: Job, token: string) {
       current_step: "SCRAPING",
       current_url: "",
     });
-    const start = Date.now();
 
     const { success, message, docs } = await startWebScraperPipeline({
       job,
@@ -161,7 +196,6 @@ async function processJob(job: Job, token: string) {
     if (!success) {
       throw new Error(message);
     }
-    const end = Date.now();
 
     const rawHtml = docs[0] ? docs[0].rawHtml : "";
 
@@ -231,6 +265,17 @@ async function processJob(job: Job, token: string) {
       await finishCrawl(job.data.crawl_id);
     }
 
+    jobsCompleted60 += 1;
+    const end = Date.now();
+    const cDone = await getScrapeQueue().getJobCounts();
+    Logger.usage("worker", {
+      event: "job_done",
+      job_id: String(job.id),
+      success: true,
+      duration_ms: end - start,
+      queue_waiting: cDone.waiting,
+      queue_active: cDone.active,
+    });
     Logger.info(`🐂 Job done ${job.id}`);
     return data;
   } catch (error) {
@@ -253,6 +298,18 @@ async function processJob(job: Job, token: string) {
     logtail.error("Overall error ingesting", {
       job_id: job.id,
       error: error.message,
+    });
+
+    jobsFailed60 += 1;
+    const end = Date.now();
+    const cFail = await getScrapeQueue().getJobCounts();
+    Logger.usage("worker", {
+      event: "job_done",
+      job_id: String(job.id),
+      success: false,
+      duration_ms: end - start,
+      queue_waiting: cFail.waiting,
+      queue_active: cFail.active,
     });
 
     const data = {
